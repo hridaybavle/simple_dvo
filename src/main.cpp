@@ -28,6 +28,9 @@ int main(int argc, char** argv){
     message_filters::Synchronizer<SP> sync(SP(10), sub_img_RGB, sub_img_depth, sub_camera);
     sync.registerCallback(boost::bind(&DVO::callback, &dvo, _1, _2, _3));
 
+    dvo.cam_odom_pub    = nh.advertise<geometry_msgs::PoseStamped>("cam_odom",1);
+    dvo.cam_path_pub   = nh.advertise<nav_msgs::Path>("cam_path",1);
+
     ros::spin();
 
     return EXIT_SUCCESS;

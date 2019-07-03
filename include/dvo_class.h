@@ -11,6 +11,9 @@
 #include "image_alignment.h"
 #include "sensor_msgs/Image.h"
 #include "sensor_msgs/CameraInfo.h"
+#include "nav_msgs/Odometry.h"
+#include "geometry_msgs/PoseStamped.h"
+#include "nav_msgs/Path.h"
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl_ros/point_cloud.h>
 #include <pcl/point_types.h>
@@ -25,22 +28,27 @@
  * @brief Class for Direct Visual Odometry
  */
 class DVO {
-    private:
-        ros::NodeHandle nh;
-        Eigen::Matrix4f accumulated_transform = Eigen::Matrix4f::Identity();
-        cv::Mat img_prev, depth_prev;
-        Eigen::Matrix3f K;
-        ros::Publisher pub_pointcloud;
-        tf::TransformBroadcaster br;
+private:
+    ros::NodeHandle nh;
+    Eigen::Matrix4f accumulated_transform = Eigen::Matrix4f::Identity();
+    cv::Mat img_prev, depth_prev;
+    Eigen::Matrix3f K;
+    ros::Publisher pub_pointcloud;
+    tf::TransformBroadcaster br;
 
-    public:
-        DVO(ros::NodeHandle nh_input){
-            nh = nh_input;
-        }
+public:
+    DVO(ros::NodeHandle nh_input){
+        nh = nh_input;
+    }
 
-        void makePointCloud( const cv::Mat& img_rgb, const cv::Mat& img_depth, pcl::PointCloud< pcl::PointXYZRGB >::Ptr& cloud);
+    std::vector<geometry_msgs::PoseStamped> cam_pose_vec_;
 
-        void callback(const sensor_msgs::ImageConstPtr& image_rgb, const sensor_msgs::ImageConstPtr& image_depth, const sensor_msgs::CameraInfoConstPtr& info);
+    ros::Publisher cam_odom_pub;
+    ros::Publisher cam_path_pub;
+
+    void makePointCloud( const cv::Mat& img_rgb, const cv::Mat& img_depth, pcl::PointCloud< pcl::PointXYZRGB >::Ptr& cloud);
+
+    void callback(const sensor_msgs::ImageConstPtr& image_rgb, const sensor_msgs::ImageConstPtr& image_depth, const sensor_msgs::CameraInfoConstPtr& info);
 };
 
 
@@ -126,12 +134,37 @@ void DVO::callback(const sensor_msgs::ImageConstPtr& image_rgb, const sensor_msg
     tform.setOrigin( tf::Vector3(accumulated_transform(0,3), accumulated_transform(1,3), accumulated_transform(2,3)));
     tf::Matrix3x3 rotation;
     rotation.setValue(
-            accumulated_transform(0,0), accumulated_transform(0,1), accumulated_transform(0,2),
-            accumulated_transform(1,0), accumulated_transform(1,1), accumulated_transform(1,2),
-            accumulated_transform(2,0), accumulated_transform(2,1), accumulated_transform(2,2)
-    );
+                accumulated_transform(0,0), accumulated_transform(0,1), accumulated_transform(0,2),
+                accumulated_transform(1,0), accumulated_transform(1,1), accumulated_transform(1,2),
+                accumulated_transform(2,0), accumulated_transform(2,1), accumulated_transform(2,2)
+                );
     tform.setBasis(rotation);
     br.sendTransform(tf::StampedTransform(tform, timestamp, "cam_origin", "camera"));
+
+    tf::Quaternion tf_odom_quat;
+    rotation.getRotation(tf_odom_quat);
+
+    geometry_msgs::PoseStamped odom_msg;
+    odom_msg.header.stamp       = ros::Time::now();
+    odom_msg.header.frame_id    = "cam_origin";
+    odom_msg.pose.position.x    = accumulated_transform(0,3);
+    odom_msg.pose.position.y    = accumulated_transform(1,3);
+    odom_msg.pose.position.z    = accumulated_transform(2,3);
+    odom_msg.pose.orientation.x = tf_odom_quat[0];
+    odom_msg.pose.orientation.y = tf_odom_quat[1];
+    odom_msg.pose.orientation.z = tf_odom_quat[2];
+    odom_msg.pose.orientation.w = tf_odom_quat[3];
+
+
+    cam_odom_pub.publish(odom_msg);
+
+    cam_pose_vec_.push_back(odom_msg);
+
+    nav_msgs::Path odom_path;
+    odom_path.header.stamp  = ros::Time::now();
+    odom_path.header.frame_id = "cam_origin";
+    odom_path.poses = cam_pose_vec_;
+    cam_path_pub.publish(odom_path);
 
     return;
 }
